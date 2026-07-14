@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Redline Events — Roster</title>
+<style>
+  :root {
+    --accent: #dc2626;
+    --accent-dark: #7f1d1d;
+    --bg: #1a0d0d;
+    --card: #2a1414;
+    --card-border: #4a2020;
+    --text: #fbeaea;
+    --text-dim: #c9a3a3;
+    --yes: #22c55e;
+    --maybe: #eab308;
+    --no: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding-bottom: 60px;
+  }
+  header {
+    padding: 28px 20px 20px;
+    text-align: center;
+    background: linear-gradient(135deg, var(--accent-dark), var(--bg));
+  }
+  header h1 { margin: 0 0 4px; font-size: 1.5rem; }
+  header p { margin: 0; color: var(--text-dim); font-size: 0.9rem; }
+
+  .container { max-width: 760px; margin: 0 auto; padding: 20px; }
+
+  .picker-row { display: flex; gap: 10px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+  .picker-row label { font-size: 0.85rem; color: var(--text-dim); }
+  select {
+    padding: 10px; border-radius: 10px;
+    background: var(--card); border: 1px solid var(--card-border);
+    color: var(--text); font-size: 0.95rem;
+  }
+
+  .view-toggle { display: flex; gap: 4px; background: var(--card); border: 1px solid var(--card-border); border-radius: 10px; padding: 4px; }
+  .view-toggle button {
+    border: none; background: transparent; color: var(--text-dim);
+    padding: 6px 14px; border-radius: 7px; font-size: 0.88rem; cursor: pointer; font-weight: 600;
+  }
+  .view-toggle button.active { background: var(--accent); color: #2a0a0a; }
+
+  .pay-badge {
+    display: inline-block; border-radius: 6px; padding: 2px 8px;
+    font-size: 0.75rem; font-weight: 600; white-space: nowrap;
+  }
+  .pay-badge.pay-Paid { background: #14532d; color: #bbf7d0; }
+  .pay-badge.pay-Pending { background: #713f12; color: #fde68a; }
+  .pay-badge.pay-AwaitingInvoice { background: #1e3a5f; color: #bfdbfe; }
+  .pay-badge.pay-Cancelled { background: #450a0a; color: #fecaca; }
+
+  .event-card {
+    background: var(--card); border: 1px solid var(--card-border);
+    border-radius: 14px; padding: 18px; margin-bottom: 18px;
+  }
+  .event-card.cancelled { opacity: 0.55; }
+  .event-card h2 { margin: 0 0 4px; font-size: 1.15rem; }
+  .event-meta { font-size: 0.82rem; color: var(--text-dim); margin-bottom: 4px; }
+  .badge {
+    display: inline-block; border-radius: 999px; padding: 2px 10px;
+    font-size: 0.72rem; margin-left: 6px; font-weight: 600;
+  }
+  .badge.crowd { background: var(--accent-dark); color: var(--text); }
+  .badge.status-Confirmed, .badge.status-Draft, .badge.status-Cancelled {
+    background: transparent; border: 1px solid; padding: 1px 9px;
+  }
+  .badge.status-Confirmed { border-color: #22c55e; color: #86efac; }
+  .badge.status-Draft { border-color: #eab308; color: #fde68a; }
+  .badge.status-Cancelled { border-color: #ef4444; color: #fecaca; }
+  .event-notes { font-size: 0.82rem; color: var(--text-dim); margin: 8px 0 0; font-style: italic; }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.84rem; }
+  table caption {
+    text-align: left; font-size: 0.78rem; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--text-dim); margin-bottom: 6px; caption-side: top;
+  }
+  th, td { text-align: left; padding: 8px 6px; border-top: 1px solid var(--card-border); }
+  th { color: var(--text-dim); font-weight: 500; font-size: 0.78rem; }
+  th.time-col, td.time-col { font-size: 0.8rem; white-space: nowrap; }
+  tr.mine td { background: rgba(220, 38, 38, 0.18); font-weight: 600; }
+  .assigned-blank { color: var(--text-dim); font-style: italic; }
+  .cal-btn {
+    background: var(--accent); color: #2a0a0a; border: none; border-radius: 6px;
+    padding: 4px 10px; font-size: 0.75rem; cursor: pointer; font-weight: 600;
+  }
+
+  .empty-state { text-align: center; color: var(--text-dim); padding: 40px 20px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Redline Events</h1>
+  <p>Upcoming roster</p>
+</header>
+
+<div class="container">
+  <div class="picker-row">
+    <label for="crew-picker">Highlight my slots:</label>
+    <select id="crew-picker">
+      <option value="">Everyone</option>
+    </select>
+    <div class="view-toggle">
+      <button type="button" id="view-upcoming" class="active">Upcoming</button>
+      <button type="button" id="view-past">Past</button>
+    </div>
+  </div>
+
+  <div id="event-list"></div>
+</div>
+
+<script>
+const SHEET_ID = "1HTuwQ4KZ2-UnH6HvytPC4DIfl8nKWJjIwXJxL97fQaU";
+const CREW_SHEET_NAME = "Crew";
+const EVENTS_SHEET_NAME = "Events";
+const AVAILABILITY_SHEET_NAME = "Availability";
+const TZ = "Australia/Melbourne";
+
+const ENTERTAINMENT_ROLES = ["DJ","MC"];
+const MEDIA_ROLES = ["Photographer","Videographer","Social Media"];
+const DOOR_ROLES = ["Register","Guestlist","Freelist","Cut-in/VIP","Second Door"];
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else field += c;
+    } else {
+      if (c === '"') inQuotes = true;
+      else if (c === ',') { row.push(field); field = ''; }
+      else if (c === '\r') { /* skip */ }
+      else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+      else field += c;
+    }
+  }
+  if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.length > 1 || (r.length === 1 && r[0] !== ''));
+}
+
+function indexHeader(headerRow) {
+  const idx = {};
+  headerRow.forEach((h, i) => { idx[h.trim()] = i; });
+  return idx;
+}
+
+// The Events tab's Date column is meant to be plain ISO text, but Sheets can
+// still auto-convert an entry into a real Date cell before/around the Plain
+// Text formatting being applied -- gviz then exports that cell's *display*
+// string (locale-dependent) instead of literal ISO text. This normalizes
+// whatever comes back into canonical "yyyy-MM-dd" so date comparisons/sorts
+// stay correct regardless of which format Sheets decided to show.
+function normalizeDateStr(raw) {
+  const s = String(raw || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // Australian locale default: D/M/YYYY (also tolerates a 2-digit year).
+  let m = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/.exec(s);
+  if (m) {
+    let [, d, mo, y] = m;
+    if (y.length === 2) y = (Number(y) < 70 ? "20" : "19") + y;
+    return `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  }
+  const dt = new Date(s);
+  if (!isNaN(dt.getTime())) {
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+  }
+  return s;
+}
+
+async function fetchCsvBySheetName(name) {
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(name)}&headers=1&_=${Date.now()}`;
+  const res = await fetch(url, { cache: "no-store" });
+  const text = await res.text();
+  if (/<html/i.test(text.slice(0, 200))) return [];
+  return parseCsv(text);
+}
+
+async function fetchCrewNames() {
+  const rows = await fetchCsvBySheetName(CREW_SHEET_NAME);
+  if (rows.length < 2) return [];
+  const idx = indexHeader(rows[0]);
+  const names = new Set();
+  rows.slice(1).forEach(r => {
+    const name = (r[idx["Name"]] || "").trim();
+    const active = (r[idx["Active"]] || "").trim().toUpperCase();
+    if (name && active !== "FALSE") names.add(name);
+  });
+  return [...names].sort();
+}
+
+async function fetchEventsFlat() {
+  const rows = await fetchCsvBySheetName(EVENTS_SHEET_NAME);
+  if (rows.length < 2) return [];
+  const idx = indexHeader(rows[0]);
+  return rows.slice(1).map(r => ({
+    date: normalizeDateStr(r[idx["Date"]]),
+    label: (r[idx["Label"]] || "").trim(),
+    location: (r[idx["Location"]] || "").trim(),
+    crowd: (r[idx["Crowd"]] || "").trim(),
+    status: (r[idx["Status"]] || "").trim(),
+    notes: (r[idx["Notes"]] || "").trim(),
+    role: (r[idx["Role"]] || "").trim(),
+    start: (r[idx["Start"]] || "").trim(),
+    end: (r[idx["End"]] || "").trim(),
+    genre: (r[idx["Genre"]] || "").trim(),
+    room: (r[idx["Room"]] || "").trim(),
+    paymentStatus: (r[idx["Payment Status"]] || "").trim(),
+    assigned: (r[idx["Assigned"]] || "").trim()
+  })).filter(r => r.date && r.label && r.role);
+}
+
+// Most recent Email on file per Name, from the Availability tab.
+async function fetchEmailMap() {
+  const rows = await fetchCsvBySheetName(AVAILABILITY_SHEET_NAME);
+  const map = {};
+  if (rows.length < 2) return map;
+  const idx = indexHeader(rows[0]);
+  rows.slice(1).forEach(r => {
+    const name = (r[idx["Name"]] || "").trim();
+    const email = (r[idx["Email"]] || "").trim();
+    if (name && email) map[name] = email;
+  });
+  return map;
+}
+
+// Groups the flat Events rows by Date+Label into event objects. Upcoming
+// events sort ascending (soonest first); past events sort descending (most
+// recent first) -- past browsing exists specifically so a crew member can
+// check whether they've been paid for a recent gig, so the most relevant
+// (most recent) one belongs at the top.
+function groupIntoEvents(rows, mode) {
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: TZ });
+  const byEvent = {};
+  rows.forEach(r => {
+    const isPast = r.date < today;
+    if (mode === "past" && !isPast) return;
+    if (mode === "upcoming" && isPast) return;
+    const key = r.date + "|" + r.label;
+    if (!byEvent[key]) {
+      byEvent[key] = { date: r.date, label: r.label, location: r.location, crowd: r.crowd, status: r.status, notes: r.notes, slots: [] };
+    }
+    byEvent[key].slots.push(r);
+  });
+  const events = Object.values(byEvent);
+  return mode === "past"
+    ? events.sort((a, b) => b.date.localeCompare(a.date))
+    : events.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function formatDateDisplay(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  return dt.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long" });
+}
+
+// ---- .ics calendar export ----
+
+function parseClockFlexible(str) {
+  str = String(str).trim();
+  let m = /^(\d{1,2}):(\d{2})$/.exec(str);
+  if (m) {
+    const hour = parseInt(m[1], 10);
+    const minute = parseInt(m[2], 10);
+    if (hour >= 0 && hour <= 23) return { hour, minute };
+  }
+  m = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/i.exec(str);
+  if (m) {
+    let hour = parseInt(m[1], 10) % 12;
+    if (/pm/i.test(m[3])) hour += 12;
+    return { hour, minute: m[2] ? parseInt(m[2], 10) : 0 };
+  }
+  return null;
+}
+
+// Nightclub-hours rule: a time before 6am belongs to the night after the
+// event's Date (e.g. a "00:00" End on a Saturday event means 12am Sunday).
+function clockToDate(clock, dateIso) {
+  const [y, m, d] = dateIso.split("-").map(Number);
+  const dayOffset = clock.hour < 6 ? 1 : 0;
+  return new Date(y, m - 1, d + dayOffset, clock.hour, clock.minute, 0, 0);
+}
+
+function tzOffsetMinutes(date, timeZone) {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone, hour12: false,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit"
+  });
+  const parts = dtf.formatToParts(date).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+  const hour = parts.hour === "24" ? "00" : parts.hour;
+  const asUTC = Date.UTC(parts.year, parts.month - 1, parts.day, hour, parts.minute, parts.second);
+  return (asUTC - date.getTime()) / 60000;
+}
+
+// DST-aware Melbourne local wall-clock -> UTC instant conversion.
+function melbourneLocalToUtc(localDate) {
+  const guessUtc = new Date(Date.UTC(
+    localDate.getFullYear(), localDate.getMonth(), localDate.getDate(),
+    localDate.getHours(), localDate.getMinutes(), 0
+  ));
+  const offsetMin = tzOffsetMinutes(guessUtc, TZ);
+  return new Date(guessUtc.getTime() - offsetMin * 60000);
+}
+
+function icsDate(date) {
+  const pad = n => String(n).padStart(2, "0");
+  return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}T${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}Z`;
+}
+
+function icsEscape(str) {
+  return String(str || "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
+}
+
+// buildVevent takes the event (for Label/Location/Notes) and the slot
+// separately -- unlike the two venues (fixed VENUE_NAME/ORGANIZER_NAME),
+// Events' location varies per event, so it has to be passed in per call
+// rather than read from a module-level constant.
+function buildVevent(ev, slot, name) {
+  const startClock = parseClockFlexible(slot.start);
+  const endClock = parseClockFlexible(slot.end);
+  if (!startClock || !endClock) return null;
+
+  const startLocal = clockToDate(startClock, ev.date);
+  let endLocal = clockToDate(endClock, ev.date);
+  if (endLocal <= startLocal) endLocal = new Date(endLocal.getTime() + 24 * 60 * 60 * 1000);
+
+  const startUtc = melbourneLocalToUtc(startLocal);
+  const endUtc = melbourneLocalToUtc(endLocal);
+
+  // Room is folded into the UID -- without it, two rooms' slots that share
+  // the same Date+Role+Start would collide onto the same calendar event.
+  const uid = `${ev.date}-${slot.role}-${slot.start}-${slot.room}-${name}@events.redlinerostering`.replace(/\s+/g, "");
+  const summary = ev.label + " — " + slot.role + (slot.room ? " (" + slot.room + ")" : "");
+  return [
+    "BEGIN:VEVENT",
+    `UID:${icsEscape(uid)}`,
+    `DTSTAMP:${icsDate(new Date())}`,
+    `DTSTART:${icsDate(startUtc)}`,
+    `DTEND:${icsDate(endUtc)}`,
+    `SUMMARY:${icsEscape(summary)}`,
+    `LOCATION:${icsEscape(ev.location)}`,
+    `DESCRIPTION:${icsEscape((slot.genre ? "Genre: " + slot.genre + "\n" : "") + (ev.notes || ""))}`,
+    "END:VEVENT"
+  ].join("\r\n");
+}
+
+function buildIcs(vevents) {
+  return ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Redline Events//Roster//EN", ...vevents, "END:VCALENDAR"].join("\r\n");
+}
+
+function downloadIcs(filename, vevents) {
+  const blob = new Blob([buildIcs(vevents)], { type: "text/calendar" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// Compact display form of a clock string, e.g. "22:00" -> "10pm", "22:30" -> "10:30pm".
+// Falls back to the raw (escaped) string if it can't be parsed as a clock time.
+function formatShortTime(str) {
+  const clock = parseClockFlexible(str);
+  if (!clock) return escapeHtml(str);
+  let h = clock.hour % 12;
+  if (h === 0) h = 12;
+  const suffix = clock.hour < 12 ? "am" : "pm";
+  const mins = clock.minute ? ":" + String(clock.minute).padStart(2, "0") : "";
+  return `${h}${mins}${suffix}`;
+}
+
+// Nightclub-hours sort key: times before 6am sort as if past midnight, so a
+// 00:30 slot lands after a 23:00 slot within the same event rather than first.
+function timeSortKey(str) {
+  const clock = parseClockFlexible(str);
+  if (!clock) return 0;
+  const h = clock.hour < 6 ? clock.hour + 24 : clock.hour;
+  return h * 60 + clock.minute;
+}
+
+// ---- rendering ----
+
+let allRows = [];
+let allEvents = [];
+let emailMap = {};
+let selectedName = "";
+let viewMode = "upcoming";
+
+function renderRoleTable(ev, slots, roleSet, caption) {
+  // Grouped by role in roleSet's order (e.g. all DJ slots before the MC slot),
+  // chronological within each role group.
+  const rows = slots.filter(s => roleSet.includes(s.role)).slice().sort((a, b) => {
+    const roleDiff = roleSet.indexOf(a.role) - roleSet.indexOf(b.role);
+    return roleDiff !== 0 ? roleDiff : timeSortKey(a.start) - timeSortKey(b.start);
+  });
+  if (rows.length === 0) return "";
+
+  const isEntertainment = caption === "Entertainment";
+  // Only show a Room column when this event actually uses more than one
+  // room -- most events are single-room, and a mostly-empty column would
+  // just be clutter.
+  const showRoom = rows.some(s => s.room);
+
+  const cells = rows.map(s => {
+    const mine = selectedName && s.assigned === selectedName;
+    const assignedCell = s.assigned
+      ? escapeHtml(s.assigned)
+      : '<span class="assigned-blank">unassigned</span>';
+    const payClass = "pay-" + s.paymentStatus.replace(/\s+/g, "");
+    const payCell = s.paymentStatus
+      ? `<span class="pay-badge ${payClass}">${escapeHtml(s.paymentStatus)}</span>`
+      : "—";
+    const calBtn = (mine && emailMap[selectedName])
+      ? `<button type="button" class="cal-btn" data-date="${escapeHtml(ev.date)}" data-label="${escapeHtml(ev.label)}" data-role="${escapeHtml(s.role)}" data-start="${escapeHtml(s.start)}" data-room="${escapeHtml(s.room)}">Add to Calendar</button>`
+      : "";
+    return `
+      <tr class="${mine ? "mine" : ""}">
+        <td class="time-col">${formatShortTime(s.start)}–${formatShortTime(s.end)}</td>
+        ${showRoom ? `<td>${s.room ? escapeHtml(s.room) : "—"}</td>` : ""}
+        ${isEntertainment ? `<td>${s.genre ? escapeHtml(s.genre) : "—"}</td>` : ""}
+        <td>${escapeHtml(s.role)}</td>
+        <td>${assignedCell}</td>
+        <td>${payCell}</td>
+        <td>${calBtn}</td>
+      </tr>`;
+  }).join("");
+
+  return `
+    <table>
+      <caption>${caption}</caption>
+      <thead><tr>
+        <th class="time-col">Time</th>
+        ${showRoom ? "<th>Room</th>" : ""}
+        ${isEntertainment ? "<th>Genre</th>" : ""}
+        <th>Role</th>
+        <th>Assigned</th>
+        <th>Paid</th>
+        <th></th>
+      </tr></thead>
+      <tbody>${cells}</tbody>
+    </table>`;
+}
+
+function render() {
+  const listEl = document.getElementById("event-list");
+  if (allEvents.length === 0) {
+    listEl.innerHTML = `<div class="empty-state">No ${viewMode === "past" ? "past" : "upcoming"} events on the roster.</div>`;
+    return;
+  }
+
+  listEl.innerHTML = allEvents.map(ev => {
+    const dateLabel = formatDateDisplay(ev.date);
+    const cancelled = ev.status === "Cancelled";
+    return `
+      <div class="event-card${cancelled ? " cancelled" : ""}">
+        <h2>${escapeHtml(ev.label)}</h2>
+        <div class="event-meta">
+          ${dateLabel}${ev.location ? " · " + escapeHtml(ev.location) : ""}
+          ${ev.crowd ? `<span class="badge crowd">${escapeHtml(ev.crowd)}</span>` : ""}
+          ${ev.status ? `<span class="badge status-${escapeHtml(ev.status)}">${escapeHtml(ev.status)}</span>` : ""}
+        </div>
+        ${ev.notes ? `<div class="event-notes">${escapeHtml(ev.notes)}</div>` : ""}
+        ${renderRoleTable(ev, ev.slots, ENTERTAINMENT_ROLES, "Entertainment")}
+        ${renderRoleTable(ev, ev.slots, MEDIA_ROLES, "Media")}
+        ${renderRoleTable(ev, ev.slots, DOOR_ROLES, "Door Staff")}
+      </div>`;
+  }).join("");
+
+  listEl.querySelectorAll(".cal-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const { date, label, role, start, room } = btn.dataset;
+      const ev = allEvents.find(e => e.date === date && e.label === label);
+      const slot = ev.slots.find(s => s.role === role && s.start === start && s.room === room);
+      const vevent = buildVevent(ev, slot, selectedName);
+      if (vevent) downloadIcs(`${label.replace(/\s+/g, "-")}-${date}.ics`, [vevent]);
+    });
+  });
+}
+
+function setViewMode(mode) {
+  viewMode = mode;
+  document.getElementById("view-upcoming").classList.toggle("active", mode === "upcoming");
+  document.getElementById("view-past").classList.toggle("active", mode === "past");
+  allEvents = groupIntoEvents(allRows, viewMode);
+  render();
+}
+
+async function main() {
+  document.getElementById("event-list").innerHTML = `<div class="empty-state">Loading roster…</div>`;
+  const [names, rows, emails] = await Promise.all([fetchCrewNames(), fetchEventsFlat(), fetchEmailMap()]);
+  emailMap = emails;
+  allRows = rows;
+  allEvents = groupIntoEvents(allRows, viewMode);
+
+  const picker = document.getElementById("crew-picker");
+  names.forEach(name => {
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    picker.appendChild(opt);
+  });
+  picker.addEventListener("change", () => {
+    selectedName = picker.value;
+    render();
+  });
+
+  document.getElementById("view-upcoming").addEventListener("click", () => setViewMode("upcoming"));
+  document.getElementById("view-past").addEventListener("click", () => setViewMode("past"));
+
+  render();
+}
+
+main();
+</script>
+</body>
+</html>

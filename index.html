@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Redline Events — Availability</title>
+<style>
+  :root {
+    --accent: #dc2626;
+    --accent-dark: #7f1d1d;
+    --bg: #1a0d0d;
+    --card: #2a1414;
+    --card-border: #4a2020;
+    --text: #fbeaea;
+    --text-dim: #c9a3a3;
+    --yes: #22c55e;
+    --maybe: #eab308;
+    --no: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding-bottom: 80px;
+  }
+  header {
+    padding: 28px 20px 20px;
+    text-align: center;
+    background: linear-gradient(135deg, var(--accent-dark), var(--bg));
+  }
+  header h1 { margin: 0 0 4px; font-size: 1.5rem; }
+  header p { margin: 0; color: var(--text-dim); font-size: 0.9rem; }
+
+  .container { max-width: 640px; margin: 0 auto; padding: 20px; }
+
+  label { display: block; font-size: 0.85rem; color: var(--text-dim); margin: 16px 0 6px; }
+  select, input[type="email"] {
+    width: 100%; padding: 12px; border-radius: 10px;
+    background: var(--card); border: 1px solid var(--card-border);
+    color: var(--text); font-size: 1rem;
+  }
+  button {
+    cursor: pointer; border: none; border-radius: 10px;
+    font-size: 1rem; font-weight: 600; padding: 14px;
+  }
+  .btn-primary {
+    width: 100%; margin-top: 24px;
+    background: var(--accent); color: #2a0a0a;
+  }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  #status-msg { text-align: center; margin-top: 12px; font-size: 0.9rem; min-height: 1.2em; }
+  #status-msg.error { color: var(--no); }
+  #status-msg.success { color: var(--yes); }
+
+  .event-card {
+    background: var(--card); border: 1px solid var(--card-border);
+    border-radius: 14px; padding: 16px; margin-bottom: 16px;
+  }
+  .event-card h3 { margin: 0 0 2px; font-size: 1.05rem; }
+  .event-meta { font-size: 0.82rem; color: var(--text-dim); margin-bottom: 12px; }
+  .event-meta .crowd-badge {
+    display: inline-block; background: var(--accent-dark); color: var(--text);
+    border-radius: 999px; padding: 2px 10px; font-size: 0.75rem; margin-left: 6px;
+  }
+
+  .slot-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; padding: 10px 0; border-top: 1px solid var(--card-border);
+  }
+  .slot-row:first-of-type { border-top: none; }
+  .slot-info { flex: 1; min-width: 0; }
+  .slot-time { font-weight: 600; font-size: 0.92rem; }
+  .slot-role { font-size: 0.78rem; color: var(--text-dim); }
+
+  .toggle-group { display: flex; gap: 6px; flex-shrink: 0; }
+  .toggle-btn {
+    padding: 8px 12px; border-radius: 8px; font-size: 0.8rem;
+    background: transparent; border: 1px solid var(--card-border); color: var(--text-dim);
+  }
+  .toggle-btn[data-val="yes"].active { background: var(--yes); color: #06210f; border-color: var(--yes); }
+  .toggle-btn[data-val="maybe"].active { background: var(--maybe); color: #2b2100; border-color: var(--maybe); }
+  .toggle-btn[data-val="no"].active { background: var(--no); color: #2b0808; border-color: var(--no); }
+
+  .empty-state { text-align: center; color: var(--text-dim); padding: 40px 20px; }
+  #form-view { display: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Redline Events</h1>
+  <p>Availability for one-off events &amp; bookings</p>
+</header>
+
+<div class="container">
+
+  <div id="name-view">
+    <label for="crew-name">Your name</label>
+    <select id="crew-name">
+      <option value="">Select your name…</option>
+    </select>
+
+    <label for="crew-email">Email</label>
+    <input type="email" id="crew-email" placeholder="you@example.com" />
+
+    <button class="btn-primary" id="continue-btn" disabled>Continue</button>
+    <div id="status-msg"></div>
+  </div>
+
+  <div id="form-view">
+    <div id="event-list"></div>
+    <button class="btn-primary" id="submit-btn">Submit Availability</button>
+    <div id="submit-status"></div>
+  </div>
+
+</div>
+
+<script>
+const SHEET_ID = "1HTuwQ4KZ2-UnH6HvytPC4DIfl8nKWJjIwXJxL97fQaU";
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxDJO5Jern2KIIWJq0yIJVKlQ5klvG6XnVk1ArGrrA9CnBW0fNbC51vfhb--LczZYCLtA/exec";
+const CREW_SHEET_NAME = "Crew";
+const EVENTS_SHEET_NAME = "Events";
+const AVAILABILITY_SHEET_NAME = "Availability";
+const TZ = "Australia/Melbourne";
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else field += c;
+    } else {
+      if (c === '"') inQuotes = true;
+      else if (c === ',') { row.push(field); field = ''; }
+      else if (c === '\r') { /* skip */ }
+      else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+      else field += c;
+    }
+  }
+  if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.length > 1 || (r.length === 1 && r[0] !== ''));
+}
+
+function indexHeader(headerRow) {
+  const idx = {};
+  headerRow.forEach((h, i) => { idx[h.trim()] = i; });
+  return idx;
+}
+
+// The Events tab's Date column is meant to be plain ISO text, but Sheets can
+// still auto-convert an entry into a real Date cell before/around the Plain
+// Text formatting being applied -- gviz then exports that cell's *display*
+// string (locale-dependent) instead of literal ISO text. This normalizes
+// whatever comes back into canonical "yyyy-MM-dd" so date comparisons/sorts
+// stay correct regardless of which format Sheets decided to show.
+function normalizeDateStr(raw) {
+  const s = String(raw || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // Australian locale default: D/M/YYYY (also tolerates a 2-digit year).
+  let m = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/.exec(s);
+  if (m) {
+    let [, d, mo, y] = m;
+    if (y.length === 2) y = (Number(y) < 70 ? "20" : "19") + y;
+    return `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  }
+  const dt = new Date(s);
+  if (!isNaN(dt.getTime())) {
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+  }
+  return s;
+}
+
+async function fetchCsvBySheetName(name) {
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(name)}&headers=1&_=${Date.now()}`;
+  const res = await fetch(url, { cache: "no-store" });
+  const text = await res.text();
+  if (/<html/i.test(text.slice(0, 200))) return [];
+  return parseCsv(text);
+}
+
+async function fetchCrewRoster() {
+  const rows = await fetchCsvBySheetName(CREW_SHEET_NAME);
+  if (rows.length < 2) throw new Error(`No crew found in the "${CREW_SHEET_NAME}" tab.`);
+  const idx = indexHeader(rows[0]);
+  const crew = [];
+  rows.slice(1).forEach(r => {
+    const name = (r[idx["Name"]] || "").trim();
+    if (!name) return;
+    const active = (r[idx["Active"]] || "").trim().toUpperCase();
+    if (active === "FALSE") return;
+    crew.push({ name, role: (r[idx["Role"]] || "").trim() });
+  });
+  return crew;
+}
+
+async function fetchEventRows() {
+  const rows = await fetchCsvBySheetName(EVENTS_SHEET_NAME);
+  if (rows.length < 2) return [];
+  const idx = indexHeader(rows[0]);
+  return rows.slice(1).map(r => ({
+    date: normalizeDateStr(r[idx["Date"]]),
+    label: (r[idx["Label"]] || "").trim(),
+    location: (r[idx["Location"]] || "").trim(),
+    crowd: (r[idx["Crowd"]] || "").trim(),
+    status: (r[idx["Status"]] || "").trim(),
+    notes: (r[idx["Notes"]] || "").trim(),
+    role: (r[idx["Role"]] || "").trim(),
+    start: (r[idx["Start"]] || "").trim(),
+    end: (r[idx["End"]] || "").trim(),
+    genre: (r[idx["Genre"]] || "").trim(),
+    room: (r[idx["Room"]] || "").trim()
+  })).filter(r => r.date && r.label && r.role);
+}
+
+async function fetchExistingAvailability(name) {
+  const rows = await fetchCsvBySheetName(AVAILABILITY_SHEET_NAME);
+  if (rows.length < 2) return {};
+  const idx = indexHeader(rows[0]);
+  const out = {};
+  rows.slice(1).forEach(r => {
+    if ((r[idx["Name"]] || "").trim() !== name) return;
+    const key = [normalizeDateStr(r[idx["Date"]]), r[idx["Label"]], r[idx["Role"]], r[idx["Start"]], r[idx["Room"]]].map(v => (v || "").trim()).join("|");
+    out[key] = (r[idx["Availability"]] || "").trim().toLowerCase();
+    const email = (r[idx["Email"]] || "").trim();
+    if (email) out.__email = email;
+  });
+  return out;
+}
+
+let crewRoster = [];
+let eventRows = [];
+let selectedName = "";
+const answers = {}; // slotKey -> "yes"|"maybe"|"no"
+const slotMeta = {}; // slotKey -> { date, label, role, start, end, genre, room, location, crowd, notes }
+
+function todayIso() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: TZ }); // en-CA => YYYY-MM-DD
+}
+
+// Room disambiguates two otherwise-identical slots that only differ by which
+// room they're in (e.g. two DJs both starting at 11:00 in different rooms of
+// the same event) -- without it, they'd collide into the same key.
+function slotKey(s) {
+  return [s.date, s.label, s.role, s.start, s.room].join("|");
+}
+
+async function init() {
+  try {
+    [crewRoster, eventRows] = await Promise.all([fetchCrewRoster(), fetchEventRows()]);
+  } catch (err) {
+    document.getElementById("status-msg").textContent = "Couldn't load the crew list. Please refresh.";
+    document.getElementById("status-msg").className = "error";
+    return;
+  }
+
+  const names = [...new Set(crewRoster.map(c => c.name))].sort();
+  const select = document.getElementById("crew-name");
+  names.forEach(name => {
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    select.appendChild(opt);
+  });
+
+  select.addEventListener("change", updateContinueState);
+  document.getElementById("crew-email").addEventListener("input", updateContinueState);
+  document.getElementById("continue-btn").addEventListener("click", showForm);
+  document.getElementById("submit-btn").addEventListener("click", submitForm);
+}
+
+function updateContinueState() {
+  const name = document.getElementById("crew-name").value;
+  const email = document.getElementById("crew-email").value.trim();
+  document.getElementById("continue-btn").disabled = !(name && email.includes("@"));
+}
+
+async function showForm() {
+  selectedName = document.getElementById("crew-name").value;
+  const myRoles = new Set(crewRoster.filter(c => c.name === selectedName).map(c => c.role));
+
+  const today = todayIso();
+  const mySlots = eventRows.filter(r =>
+    r.date >= today && r.status !== "Cancelled" && myRoles.has(r.role)
+  );
+
+  const existing = await fetchExistingAvailability(selectedName);
+
+  document.getElementById("name-view").style.display = "none";
+  document.getElementById("form-view").style.display = "block";
+
+  const listEl = document.getElementById("event-list");
+  listEl.innerHTML = "";
+
+  if (mySlots.length === 0) {
+    listEl.innerHTML = '<div class="empty-state">No upcoming events need your role right now — check back later.</div>';
+    document.getElementById("submit-btn").style.display = "none";
+    return;
+  }
+
+  // Group by Date+Label
+  const byEvent = {};
+  mySlots.forEach(s => {
+    const ek = s.date + "|" + s.label;
+    if (!byEvent[ek]) byEvent[ek] = { date: s.date, label: s.label, location: s.location, crowd: s.crowd, slots: [] };
+    byEvent[ek].slots.push(s);
+  });
+  const events = Object.values(byEvent).sort((a, b) => a.date.localeCompare(b.date));
+
+  events.forEach(ev => {
+    const card = document.createElement("div");
+    card.className = "event-card";
+
+    const dateLabel = formatDateDisplay(ev.date);
+    card.innerHTML = `
+      <h3>${escapeHtml(ev.label)}</h3>
+      <div class="event-meta">${dateLabel}${ev.location ? " · " + escapeHtml(ev.location) : ""}${ev.crowd ? `<span class="crowd-badge">${escapeHtml(ev.crowd)}</span>` : ""}</div>
+    `;
+
+    ev.slots.forEach(s => {
+      const key = slotKey(s);
+      slotMeta[key] = s;
+      if (existing[key]) answers[key] = existing[key];
+
+      const row = document.createElement("div");
+      row.className = "slot-row";
+      const genreText = s.genre ? ` · ${escapeHtml(s.genre)}` : "";
+      const roomText = s.room ? ` · ${escapeHtml(s.room)}` : "";
+      row.innerHTML = `
+        <div class="slot-info">
+          <div class="slot-time">${escapeHtml(s.start)} – ${escapeHtml(s.end)}${roomText}</div>
+          <div class="slot-role">${escapeHtml(s.role)}${genreText}</div>
+        </div>
+        <div class="toggle-group" data-key="${key}">
+          <button type="button" class="toggle-btn" data-val="yes">Yes</button>
+          <button type="button" class="toggle-btn" data-val="maybe">Maybe</button>
+          <button type="button" class="toggle-btn" data-val="no">No</button>
+        </div>
+      `;
+      card.appendChild(row);
+    });
+
+    listEl.appendChild(card);
+  });
+
+  document.querySelectorAll(".toggle-group").forEach(group => {
+    const key = group.dataset.key;
+    group.querySelectorAll(".toggle-btn").forEach(btn => {
+      if (answers[key] === btn.dataset.val) btn.classList.add("active");
+      btn.addEventListener("click", () => {
+        answers[key] = btn.dataset.val;
+        group.querySelectorAll(".toggle-btn").forEach(b => b.classList.toggle("active", b === btn));
+      });
+    });
+  });
+}
+
+function formatDateDisplay(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  return dt.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long" });
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+async function submitForm() {
+  const keys = Object.keys(slotMeta);
+  const unanswered = keys.filter(k => !answers[k]);
+  if (unanswered.length > 0) {
+    document.getElementById("submit-status").textContent = "Please answer every slot before submitting.";
+    document.getElementById("submit-status").className = "error";
+    return;
+  }
+
+  const slots = keys.map(k => {
+    const m = slotMeta[k];
+    return { date: m.date, label: m.label, role: m.role, start: m.start, room: m.room, availability: answers[k] };
+  });
+
+  const email = document.getElementById("crew-email").value.trim();
+  document.getElementById("submit-btn").disabled = true;
+
+  try {
+    await fetch(SCRIPT_URL, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: selectedName, email, slots })
+    });
+    document.getElementById("submit-status").textContent = "Availability submitted — thank you!";
+    document.getElementById("submit-status").className = "success";
+  } catch (err) {
+    document.getElementById("submit-status").textContent = "Something went wrong submitting. Please try again.";
+    document.getElementById("submit-status").className = "error";
+    document.getElementById("submit-btn").disabled = false;
+  }
+}
+
+init();
+</script>
+</body>
+</html>
