@@ -64,6 +64,13 @@
     border-radius: 14px; padding: 18px; margin-bottom: 18px;
   }
   .event-card.cancelled { opacity: 0.55; }
+  .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .art-btn {
+    flex-shrink: 0; background: transparent; color: var(--text);
+    border: 1px solid var(--accent); border-radius: 8px;
+    padding: 6px 12px; font-size: 0.78rem; font-weight: 600; cursor: pointer;
+  }
+  .art-btn:hover { background: var(--accent); color: #2a0a0a; }
   .event-card h2 { margin: 0 0 4px; font-size: 1.15rem; }
   .event-meta { font-size: 0.82rem; color: var(--text-dim); margin-bottom: 4px; }
   .badge {
@@ -84,6 +91,23 @@
     text-align: left; font-size: 0.78rem; text-transform: uppercase;
     letter-spacing: 0.04em; color: var(--text-dim); margin-bottom: 6px; caption-side: top;
   }
+  .role-section { margin-top: 14px; }
+  .section-caption {
+    font-size: 0.78rem; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--text-dim); margin-bottom: 2px;
+  }
+  .room-group {
+    margin-top: 12px; padding: 10px 12px 4px;
+    background: rgba(0, 0, 0, 0.18); border: 1px solid var(--card-border);
+    border-left: 3px solid var(--accent); border-radius: 10px;
+  }
+  .room-heading {
+    margin: 0; font-size: 0.95rem; font-weight: 700;
+    display: flex; justify-content: space-between; align-items: baseline;
+  }
+  .room-count { font-size: 0.72rem; font-weight: 500; color: var(--text-dim); }
+  .room-group table { margin-top: 6px; }
+  .role-section > table { margin-top: 6px; }
   th, td { text-align: left; padding: 8px 6px; border-top: 1px solid var(--card-border); }
   th { color: var(--text-dim); font-weight: 500; font-size: 0.78rem; }
   th.time-col, td.time-col { font-size: 0.8rem; white-space: nowrap; }
@@ -403,6 +427,177 @@ function timeSortKey(str) {
   return h * 60 + clock.minute;
 }
 
+// ---- generated event artwork (PNG lineup graphic) ----
+// Draws a 1080x1350 (4:5, Instagram-post) lineup graphic for the whole event
+// from the roster rows: one block per room with each set's time and artist.
+// Only entertainment roles go on the artwork; door/media stay internal.
+
+const ART_W = 1080, ART_H = 1350;
+const ART_FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+
+function artFitText(ctx, text, maxWidth) {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let t = text;
+  while (t.length > 1 && ctx.measureText(t + "…").width > maxWidth) t = t.slice(0, -1);
+  return t + "…";
+}
+
+// Largest font size (<= startSize) at which `text` fits on one line.
+function artShrinkToFit(ctx, text, weight, startSize, minSize, maxWidth) {
+  let size = startSize;
+  while (size > minSize) {
+    ctx.font = `${weight} ${size}px ${ART_FONT}`;
+    if (ctx.measureText(text).width <= maxWidth) break;
+    size -= 2;
+  }
+  ctx.font = `${weight} ${size}px ${ART_FONT}`;
+  return size;
+}
+
+function artRoundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function buildEventArtwork(ev) {
+  const slots = ev.slots
+    .filter(s => ENTERTAINMENT_ROLES.includes(s.role))
+    .slice()
+    .sort((a, b) => timeSortKey(a.start) - timeSortKey(b.start));
+
+  // Group by room, rooms ordered by their earliest set (same as the roster).
+  const roomMap = new Map();
+  slots.forEach(s => {
+    const room = s.room || "";
+    if (!roomMap.has(room)) roomMap.set(room, []);
+    roomMap.get(room).push(s);
+  });
+  const rooms = [...roomMap.entries()];
+
+  const canvas = document.createElement("canvas");
+  canvas.width = ART_W;
+  canvas.height = ART_H;
+  const ctx = canvas.getContext("2d");
+
+  // Background
+  const bg = ctx.createLinearGradient(0, 0, ART_W, ART_H);
+  bg.addColorStop(0, "#7f1d1d");
+  bg.addColorStop(0.45, "#2a0c0c");
+  bg.addColorStop(1, "#120707");
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, ART_W, ART_H);
+  const glow = ctx.createRadialGradient(ART_W * 0.85, 120, 20, ART_W * 0.85, 120, 700);
+  glow.addColorStop(0, "rgba(220,38,38,0.35)");
+  glow.addColorStop(1, "rgba(220,38,38,0)");
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, ART_W, ART_H);
+
+  const M = 64; // outer margin
+  ctx.textBaseline = "alphabetic";
+
+  // Header
+  ctx.fillStyle = "#dc2626";
+  ctx.fillRect(M, M, 72, 8);
+  ctx.font = `700 26px ${ART_FONT}`;
+  ctx.fillStyle = "#fca5a5";
+  ctx.fillText("REDLINE EVENTS", M, M + 52);
+
+  const titleSize = artShrinkToFit(ctx, ev.label.toUpperCase(), 800, 88, 40, ART_W - 2 * M);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(ev.label.toUpperCase(), M, M + 52 + 18 + titleSize);
+
+  let y = M + 52 + 18 + titleSize + 50;
+  const sub = formatDateDisplay(ev.date) + (ev.location ? "  ·  " + ev.location : "");
+  ctx.font = `500 32px ${ART_FONT}`;
+  ctx.fillStyle = "#fbeaea";
+  ctx.fillText(artFitText(ctx, sub, ART_W - 2 * M), M, y);
+  y += 44;
+
+  // Footer
+  const footerH = 60;
+  ctx.font = `500 22px ${ART_FONT}`;
+  ctx.fillStyle = "rgba(251,234,234,0.55)";
+  ctx.fillText("Set times subject to change", M, ART_H - M + 10);
+
+  if (rooms.length === 0) {
+    ctx.font = `600 40px ${ART_FONT}`;
+    ctx.fillStyle = "#fbeaea";
+    ctx.fillText("Lineup to be announced", M, y + 120);
+    return canvas;
+  }
+
+  // Lineup area: rooms in a grid (1 column for a single room, else 2).
+  const top = y + 20;
+  const bottom = ART_H - M - footerH;
+  const cols = rooms.length === 1 ? 1 : 2;
+  const gap = 24;
+  const colW = (ART_W - 2 * M - gap * (cols - 1)) / cols;
+  const gridRows = [];
+  for (let i = 0; i < rooms.length; i += cols) gridRows.push(rooms.slice(i, i + cols));
+
+  // Line height that fits every grid row; each grid row is as tall as its
+  // longest room. Block = header (2.0 lines) + slots + padding (0.9 line).
+  const totalLines = gridRows.reduce((sum, row) => sum + Math.max(...row.map(([, s]) => s.length)) + 2.9, 0);
+  const avail = bottom - top - gap * (gridRows.length - 1);
+  const lineH = Math.max(28, Math.min(cols === 1 ? 64 : 52, avail / totalLines));
+  const fontSize = Math.round(lineH * 0.5);
+
+  let rowY = top;
+  gridRows.forEach(row => {
+    const rowLines = Math.max(...row.map(([, s]) => s.length));
+    const blockH = (rowLines + 2.9) * lineH;
+    row.forEach(([room, roomSlots], ci) => {
+      const x = M + ci * (colW + gap);
+      ctx.fillStyle = "rgba(0,0,0,0.32)";
+      artRoundRect(ctx, x, rowY, colW, blockH, 18);
+      ctx.fill();
+      ctx.fillStyle = "#dc2626";
+      ctx.fillRect(x, rowY + 18, 6, blockH - 36);
+
+      const pad = 28;
+      ctx.font = `800 ${Math.round(fontSize * 1.2)}px ${ART_FONT}`;
+      ctx.fillStyle = "#fca5a5";
+      ctx.fillText(artFitText(ctx, (room || (rooms.length > 1 ? "Other" : "Lineup")).toUpperCase(), colW - 2 * pad), x + pad, rowY + lineH * 1.25);
+
+      ctx.font = `500 ${Math.round(fontSize * 0.88)}px ${ART_FONT}`;
+      const timeW = Math.max(...roomSlots.map(s => ctx.measureText(`${formatShortTime(s.start)}–${formatShortTime(s.end)}`.toUpperCase()).width)) + Math.round(fontSize * 0.9);
+      roomSlots.forEach((s, i) => {
+        const ly = rowY + lineH * (2.35 + i);
+        ctx.font = `500 ${Math.round(fontSize * 0.88)}px ${ART_FONT}`;
+        ctx.fillStyle = "rgba(251,234,234,0.7)";
+        ctx.fillText(`${formatShortTime(s.start)}–${formatShortTime(s.end)}`.toUpperCase(), x + pad, ly);
+        ctx.font = `700 ${fontSize}px ${ART_FONT}`;
+        ctx.fillStyle = "#ffffff";
+        const name = s.assigned ? s.assigned.toUpperCase() : "TBA";
+        ctx.fillText(artFitText(ctx, name, colW - 2 * pad - timeW), x + pad + timeW, ly);
+      });
+    });
+    rowY += blockH + gap;
+  });
+
+  return canvas;
+}
+
+function downloadEventArtwork(ev) {
+  const canvas = buildEventArtwork(ev);
+  canvas.toBlob(blob => {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${ev.label.replace(/[^\w\-]+/g, "-")}-${ev.date}-lineup.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, "image/png");
+}
+
 // ---- rendering ----
 
 let allRows = [];
@@ -421,11 +616,31 @@ function renderRoleTable(ev, slots, roleSet, caption) {
   if (rows.length === 0) return "";
 
   const isEntertainment = caption === "Entertainment";
-  // Only show a Room column when this event actually uses more than one
-  // room -- most events are single-room, and a mostly-empty column would
-  // just be clutter.
-  const showRoom = rows.some(s => s.room);
 
+  // Multi-room events (e.g. a festival-style night with several stages) get
+  // one sub-table per room, so each room's running order reads top to bottom
+  // instead of being interleaved by start time. Rooms are ordered by their
+  // earliest slot. Single-room events keep the one-table layout.
+  const roomNames = [...new Set(rows.map(s => s.room || ""))];
+  if (roomNames.length > 1) {
+    const earliest = r => Math.min(...rows.filter(s => (s.room || "") === r).map(s => timeSortKey(s.start)));
+    roomNames.sort((a, b) => (earliest(a) - earliest(b)) || a.localeCompare(b));
+    const groups = roomNames.map(room => {
+      const roomRows = rows.filter(s => (s.room || "") === room);
+      return `
+        <div class="room-group">
+          <h3 class="room-heading">${room ? escapeHtml(room) : "Other"}<span class="room-count">${roomRows.length} slot${roomRows.length === 1 ? "" : "s"}</span></h3>
+          ${buildSlotTable(ev, roomRows, isEntertainment, false)}
+        </div>`;
+    }).join("");
+    return `<div class="role-section"><div class="section-caption">${caption}</div>${groups}</div>`;
+  }
+
+  const showRoom = rows.some(s => s.room);
+  return `<div class="role-section"><div class="section-caption">${caption}</div>${buildSlotTable(ev, rows, isEntertainment, showRoom)}</div>`;
+}
+
+function buildSlotTable(ev, rows, isEntertainment, showRoom) {
   const cells = rows.map(s => {
     const mine = selectedName && s.assigned === selectedName;
     const assignedCell = s.assigned
@@ -452,7 +667,6 @@ function renderRoleTable(ev, slots, roleSet, caption) {
 
   return `
     <table>
-      <caption>${caption}</caption>
       <thead><tr>
         <th class="time-col">Time</th>
         ${showRoom ? "<th>Room</th>" : ""}
@@ -478,7 +692,10 @@ function render() {
     const cancelled = ev.status === "Cancelled";
     return `
       <div class="event-card${cancelled ? " cancelled" : ""}">
-        <h2>${escapeHtml(ev.label)}</h2>
+        <div class="card-head">
+          <h2>${escapeHtml(ev.label)}</h2>
+          <button type="button" class="art-btn" data-date="${escapeHtml(ev.date)}" data-label="${escapeHtml(ev.label)}">Download artwork</button>
+        </div>
         <div class="event-meta">
           ${dateLabel}${ev.location ? " · " + escapeHtml(ev.location) : ""}
           ${ev.crowd ? `<span class="badge crowd">${escapeHtml(ev.crowd)}</span>` : ""}
@@ -490,6 +707,13 @@ function render() {
         ${renderRoleTable(ev, ev.slots, DOOR_ROLES, "Door Staff")}
       </div>`;
   }).join("");
+
+  listEl.querySelectorAll(".art-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const ev = allEvents.find(e => e.date === btn.dataset.date && e.label === btn.dataset.label);
+      if (ev) downloadEventArtwork(ev);
+    });
+  });
 
   listEl.querySelectorAll(".cal-btn").forEach(btn => {
     btn.addEventListener("click", () => {
