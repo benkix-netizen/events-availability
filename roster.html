@@ -43,6 +43,18 @@
     color: var(--text); font-size: 0.95rem;
   }
 
+  .my-sets-bar {
+    display: none; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+    background: var(--card); border: 1px solid var(--card-border); border-radius: 12px;
+    padding: 12px 14px; margin: -8px 0 20px;
+  }
+  .my-sets-bar.show { display: flex; }
+  .my-sets-bar .msg { font-size: 0.88rem; color: var(--text); }
+  .add-all-btn {
+    background: var(--accent); color: #2a0a0a; border: none; border-radius: 8px;
+    padding: 8px 14px; font-size: 0.85rem; font-weight: 700; cursor: pointer; white-space: nowrap;
+  }
+
   .view-toggle { display: flex; gap: 4px; background: var(--card); border: 1px solid var(--card-border); border-radius: 10px; padding: 4px; }
   .view-toggle button {
     border: none; background: transparent; color: var(--text-dim);
@@ -149,7 +161,7 @@
 
 <div class="container">
   <div class="picker-row">
-    <label for="crew-picker">Highlight my slots:</label>
+    <label for="crew-picker">Your name:</label>
     <select id="crew-picker">
       <option value="">Everyone</option>
     </select>
@@ -157,6 +169,11 @@
       <button type="button" id="view-upcoming" class="active">Upcoming</button>
       <button type="button" id="view-past">Past</button>
     </div>
+  </div>
+
+  <div class="my-sets-bar" id="my-sets-bar">
+    <span class="msg" id="my-sets-msg"></span>
+    <button type="button" class="add-all-btn" id="add-all-btn">Add all my sets to Calendar</button>
   </div>
 
   <div id="event-list"></div>
@@ -817,6 +834,38 @@ function googleCalendarUrl(ev, slot) {
   return "https://calendar.google.com/calendar/render?" + params.toString();
 }
 
+// Like LKF: pick your name, then download every upcoming set of yours as
+// one .ics file (opens in Apple Calendar / Outlook; Google Calendar can
+// import it via Settings > Import).
+function updateMySetsBar() {
+  const bar = document.getElementById("my-sets-bar");
+  const msg = document.getElementById("my-sets-msg");
+  const btn = document.getElementById("add-all-btn");
+  if (!selectedName) { bar.classList.remove("show"); return; }
+
+  const upcoming = groupIntoEvents(allRows, "upcoming");
+  const mine = [];
+  upcoming.forEach(ev => {
+    if (ev.status === "Cancelled") return;
+    ev.slots.forEach(s => { if (s.assigned === selectedName) mine.push({ ev, slot: s }); });
+  });
+  bar.classList.add("show");
+
+  if (mine.length === 0) {
+    msg.textContent = "You don't have any upcoming sets on the roster.";
+    btn.style.display = "none";
+    return;
+  }
+  const eventCount = new Set(mine.map(m => m.ev.date + "|" + m.ev.label)).size;
+  msg.textContent = `You have ${mine.length} upcoming set${mine.length === 1 ? "" : "s"}` +
+    (eventCount !== mine.length ? ` across ${eventCount} event${eventCount === 1 ? "" : "s"}.` : ".");
+  btn.style.display = "inline-block";
+  btn.onclick = () => {
+    const vevents = mine.map(m => buildVevent(m.ev, m.slot, selectedName)).filter(Boolean);
+    if (vevents.length) downloadIcs(`Redline-Events-${selectedName.replace(/\s+/g, "-")}-all-sets.ics`, vevents);
+  };
+}
+
 function setViewMode(mode) {
   viewMode = mode;
   document.getElementById("view-upcoming").classList.toggle("active", mode === "upcoming");
@@ -833,7 +882,11 @@ async function main() {
   allEvents = groupIntoEvents(allRows, viewMode);
 
   const picker = document.getElementById("crew-picker");
-  names.forEach(name => {
+  // Crew tab names plus anyone assigned on the Events tab (e.g. guest DJs
+  // who aren't on Crew), so every DJ can find themselves.
+  const allNames = [...new Set([...names, ...rows.map(r => r.assigned).filter(Boolean)])]
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  allNames.forEach(name => {
     const opt = document.createElement("option");
     opt.value = name;
     opt.textContent = name;
@@ -842,6 +895,7 @@ async function main() {
   picker.addEventListener("change", () => {
     selectedName = picker.value;
     render();
+    updateMySetsBar();
   });
 
   document.getElementById("view-upcoming").addEventListener("click", () => setViewMode("upcoming"));
