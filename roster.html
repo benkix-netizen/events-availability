@@ -116,7 +116,26 @@
   .cal-btn {
     background: var(--accent); color: #2a0a0a; border: none; border-radius: 6px;
     padding: 4px 10px; font-size: 0.75rem; cursor: pointer; font-weight: 600;
+    white-space: nowrap;
   }
+  .cal-wrap { position: relative; display: inline-block; }
+  .cal-menu {
+    display: none; position: fixed; z-index: 50;
+    background: #1a1a1a; border: 1px solid var(--card-border); border-radius: 8px;
+    min-width: 170px; padding: 4px; box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+  }
+  .cal-wrap.open .cal-menu { display: block; }
+  .cal-cell { margin-top: 6px; }
+  .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .cal-menu button {
+    display: block; width: 100%; text-align: left; background: none; border: none;
+    color: var(--text, #eee); padding: 8px 10px; font-size: 0.8rem; border-radius: 6px; cursor: pointer;
+  }
+  @media (max-width: 520px) {
+    th, td { padding: 8px 4px; }
+    .cal-btn { padding: 4px 7px; font-size: 0.7rem; }
+  }
+  .cal-menu button:hover { background: rgba(220, 38, 38, 0.25); }
 
   .empty-state { text-align: center; color: var(--text-dim); padding: 40px 20px; }
 </style>
@@ -650,23 +669,31 @@ function buildSlotTable(ev, rows, isEntertainment, showRoom) {
     const payCell = s.paymentStatus
       ? `<span class="pay-badge ${payClass}">${escapeHtml(s.paymentStatus)}</span>`
       : "—";
-    const calBtn = (mine && emailMap[selectedName])
-      ? `<button type="button" class="cal-btn" data-date="${escapeHtml(ev.date)}" data-label="${escapeHtml(ev.label)}" data-role="${escapeHtml(s.role)}" data-start="${escapeHtml(s.start)}" data-room="${escapeHtml(s.room)}">Add to Calendar</button>`
+    // Every timed slot gets an Add to Calendar menu (Google Calendar link or
+    // an .ics file for Apple/Outlook), no crew pick or email needed.
+    const dataAttrs = `data-date="${escapeHtml(ev.date)}" data-label="${escapeHtml(ev.label)}" data-role="${escapeHtml(s.role)}" data-start="${escapeHtml(s.start)}" data-room="${escapeHtml(s.room)}"`;
+    const calBtn = (parseClockFlexible(s.start) && parseClockFlexible(s.end))
+      ? `<div class="cal-wrap">
+           <button type="button" class="cal-btn" aria-haspopup="true" title="Add to calendar">+ Calendar</button>
+           <div class="cal-menu" role="menu">
+             <button type="button" class="cal-google" ${dataAttrs}>Google Calendar</button>
+             <button type="button" class="cal-ics" ${dataAttrs}>Apple / Outlook (.ics)</button>
+           </div>
+         </div>`
       : "";
     return `
       <tr class="${mine ? "mine" : ""}">
-        <td class="time-col">${formatShortTime(s.start)}–${formatShortTime(s.end)}</td>
+        <td class="time-col">${formatShortTime(s.start)}–${formatShortTime(s.end)}${calBtn ? `<div class="cal-cell">${calBtn}</div>` : ""}</td>
         ${showRoom ? `<td>${s.room ? escapeHtml(s.room) : "—"}</td>` : ""}
         ${isEntertainment ? `<td>${s.genre ? escapeHtml(s.genre) : "—"}</td>` : ""}
         <td>${escapeHtml(s.role)}</td>
         <td>${assignedCell}</td>
         <td>${payCell}</td>
-        <td>${calBtn}</td>
       </tr>`;
   }).join("");
 
   return `
-    <table>
+    <div class="table-scroll"><table>
       <thead><tr>
         <th class="time-col">Time</th>
         ${showRoom ? "<th>Room</th>" : ""}
@@ -674,10 +701,9 @@ function buildSlotTable(ev, rows, isEntertainment, showRoom) {
         <th>Role</th>
         <th>Assigned</th>
         <th>Paid</th>
-        <th></th>
       </tr></thead>
       <tbody>${cells}</tbody>
-    </table>`;
+    </table></div>`;
 }
 
 function render() {
@@ -716,14 +742,79 @@ function render() {
   });
 
   listEl.querySelectorAll(".cal-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const { date, label, role, start, room } = btn.dataset;
-      const ev = allEvents.find(e => e.date === date && e.label === label);
-      const slot = ev.slots.find(s => s.role === role && s.start === start && s.room === room);
-      const vevent = buildVevent(ev, slot, selectedName);
-      if (vevent) downloadIcs(`${label.replace(/\s+/g, "-")}-${date}.ics`, [vevent]);
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      const wrap = btn.parentElement;
+      const wasOpen = wrap.classList.contains("open");
+      closeCalMenus();
+      if (!wasOpen) {
+        wrap.classList.add("open");
+        // Fixed positioning so the menu isn't clipped by the scrollable table.
+        const menu = wrap.querySelector(".cal-menu");
+        const r = btn.getBoundingClientRect();
+        const w = menu.offsetWidth;
+        menu.style.top = (r.bottom + 4) + "px";
+        menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + "px";
+      }
     });
   });
+
+  const findSlot = btn => {
+    const { date, label, role, start, room } = btn.dataset;
+    const ev = allEvents.find(e => e.date === date && e.label === label);
+    const slot = ev && ev.slots.find(s => s.role === role && s.start === start && s.room === room);
+    return { ev, slot };
+  };
+
+  listEl.querySelectorAll(".cal-ics").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const { ev, slot } = findSlot(btn);
+      closeCalMenus();
+      if (!slot) return;
+      const vevent = buildVevent(ev, slot, slot.assigned || selectedName || "crew");
+      if (vevent) downloadIcs(`${ev.label.replace(/\s+/g, "-")}-${ev.date}.ics`, [vevent]);
+    });
+  });
+
+  listEl.querySelectorAll(".cal-google").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const { ev, slot } = findSlot(btn);
+      closeCalMenus();
+      if (!slot) return;
+      const url = googleCalendarUrl(ev, slot);
+      if (url) window.open(url, "_blank", "noopener");
+    });
+  });
+}
+
+function closeCalMenus() {
+  document.querySelectorAll(".cal-wrap.open").forEach(w => w.classList.remove("open"));
+}
+document.addEventListener("click", closeCalMenus);
+window.addEventListener("scroll", closeCalMenus, true);
+window.addEventListener("resize", closeCalMenus);
+
+// Google Calendar "add event" link for one slot, using the same DST-aware
+// time conversion as the .ics export.
+function googleCalendarUrl(ev, slot) {
+  const startClock = parseClockFlexible(slot.start);
+  const endClock = parseClockFlexible(slot.end);
+  if (!startClock || !endClock) return null;
+  const startLocal = clockToDate(startClock, ev.date);
+  let endLocal = clockToDate(endClock, ev.date);
+  if (endLocal <= startLocal) endLocal = new Date(endLocal.getTime() + 24 * 60 * 60 * 1000);
+  const startUtc = melbourneLocalToUtc(startLocal);
+  const endUtc = melbourneLocalToUtc(endLocal);
+  const title = ev.label + " — " + slot.role + (slot.room ? " (" + slot.room + ")" : "");
+  const details = (slot.genre ? "Genre: " + slot.genre + "\n" : "") + (ev.notes || "");
+  const params = new URLSearchParams({
+    action: "TEMPLATE",
+    text: title,
+    dates: icsDate(startUtc) + "/" + icsDate(endUtc),
+    details,
+    location: ev.location || ""
+  });
+  return "https://calendar.google.com/calendar/render?" + params.toString();
 }
 
 function setViewMode(mode) {
